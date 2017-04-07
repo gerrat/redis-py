@@ -1,5 +1,12 @@
-redis-py
+redis-py (for Python2.4)
 ========
+====
+Note::  
+
+    This version has been backported to Python 2.4 (don't ask)
+    There are no warranties (express or implied) that this code is suitable for any purpose
+    The tests were not backported, so likely won't run without modifications.
+
 
 The Python interface to the Redis key-value store.
 
