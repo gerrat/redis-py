@@ -1,4 +1,3 @@
-from __future__ import with_statement
 from itertools import chain
 import datetime
 import sys
@@ -6,6 +5,7 @@ import warnings
 import time
 import threading
 import time as mod_time
+from redis.utils import ternary
 from redis._compat import (b, basestring, bytes, imap, iteritems, iterkeys,
                            itervalues, izip, long, nativestr, unicode,
                            safe_unicode)
@@ -249,7 +249,7 @@ def parse_client_list(response, **options):
 
 
 def parse_config_get(response, **options):
-    response = [nativestr(i) if i is not None else None for i in response]
+    response = [ternary(i is not None, lambda: nativestr(i), lambda: None) for i in response]
     return response and pairs_to_dict(response) or {}
 
 
@@ -296,7 +296,7 @@ def _parse_node_line(line):
         'last_pong_rcvd': pong,
         'epoch': epoch,
         'slots': slots,
-        'connected': True if connected == 'connected' else False
+        'connected': ternary(connected == 'connected', lambda: True, lambda: False)
     }
     return addr, node_dict
 
@@ -575,18 +575,39 @@ class StrictRedis(object):
         shard_hint = kwargs.pop('shard_hint', None)
         value_from_callable = kwargs.pop('value_from_callable', False)
         watch_delay = kwargs.pop('watch_delay', None)
-        with self.pipeline(True, shard_hint) as pipe:
-            while 1:
-                try:
-                    if watches:
-                        pipe.watch(*watches)
-                    func_value = func(pipe)
-                    exec_value = pipe.execute()
-                    return func_value if value_from_callable else exec_value
-                except WatchError:
-                    if watch_delay is not None and watch_delay > 0:
-                        time.sleep(watch_delay)
-                    continue
+
+
+        #with self.pipeline(True, shard_hint) as pipe:
+        mgr = self.pipeline(True, shard_hint)
+        exit = type(mgr).__exit__
+        value = type(mgr).__enter__(mgr)
+        exc = True
+        try:
+            try:
+                VAR = value
+    
+                ####block
+                while 1:
+                    try:
+                        if watches:
+                            pipe.watch(*watches)
+                        func_value = func(pipe)
+                        exec_value = pipe.execute()
+                        #return func_value if value_from_callable else exec_value
+                        return ternary(value_from_callable, lambda: func_value, lambda: exec_value)
+                    except WatchError:
+                        if watch_delay is not None and watch_delay > 0:
+                            time.sleep(watch_delay)
+                        continue
+                ####block
+            except:
+                exc = False
+                if not exit(mgr, *sys.exc_info()):
+                    raise
+        finally:
+            if exc:
+                exit(mgr, None, None, None)
+    
 
     def lock(self, name, timeout=None, sleep=0.1, blocking_timeout=None,
              lock_class=None, thread_local=True):
@@ -662,14 +683,15 @@ class StrictRedis(object):
         command_name = args[0]
         connection = pool.get_connection(command_name, **options)
         try:
-            connection.send_command(*args)
-            return self.parse_response(connection, command_name, **options)
-        except (ConnectionError, TimeoutError) as e:
-            connection.disconnect()
-            if not connection.retry_on_timeout and isinstance(e, TimeoutError):
-                raise
-            connection.send_command(*args)
-            return self.parse_response(connection, command_name, **options)
+            try:
+                connection.send_command(*args)
+                return self.parse_response(connection, command_name, **options)
+            except (ConnectionError, TimeoutError), e:
+                connection.disconnect()
+                if not connection.retry_on_timeout and isinstance(e, TimeoutError):
+                    raise
+                connection.send_command(*args)
+                return self.parse_response(connection, command_name, **options)
         finally:
             pool.release(connection)
 
@@ -1446,7 +1468,8 @@ class StrictRedis(object):
                                 'must be specified and contain at least '
                                 'two keys')
 
-        options = {'groups': len(get) if groups else None}
+        #options = {'groups': len(get) if groups else None}
+        options = {'groups': ternary(groups, lambda: len(get), lambda: None)}
         return self.execute_command('SORT', *pieces, **options)
 
     # SCAN COMMANDS
@@ -2411,7 +2434,7 @@ class PubSub(object):
     def _execute(self, connection, command, *args):
         try:
             return command(*args)
-        except (ConnectionError, TimeoutError) as e:
+        except (ConnectionError, TimeoutError), e:
             connection.disconnect()
             if not connection.retry_on_timeout and isinstance(e, TimeoutError):
                 raise
@@ -2712,7 +2735,7 @@ class BasePipeline(object):
         try:
             conn.send_command(*args)
             return self.parse_response(conn, command_name, **options)
-        except (ConnectionError, TimeoutError) as e:
+        except (ConnectionError, TimeoutError), e:
             conn.disconnect()
             if not conn.retry_on_timeout and isinstance(e, TimeoutError):
                 raise
@@ -2876,22 +2899,23 @@ class BasePipeline(object):
             self.connection = conn
 
         try:
-            return execute(conn, stack, raise_on_error)
-        except (ConnectionError, TimeoutError) as e:
-            conn.disconnect()
-            if not conn.retry_on_timeout and isinstance(e, TimeoutError):
-                raise
-            # if we were watching a variable, the watch is no longer valid
-            # since this connection has died. raise a WatchError, which
-            # indicates the user should retry his transaction. If this is more
-            # than a temporary failure, the WATCH that the user next issues
-            # will fail, propegating the real ConnectionError
-            if self.watching:
-                raise WatchError("A ConnectionError occured on while watching "
-                                 "one or more keys")
-            # otherwise, it's safe to retry since the transaction isn't
-            # predicated on any state
-            return execute(conn, stack, raise_on_error)
+            try:
+                return execute(conn, stack, raise_on_error)
+            except (ConnectionError, TimeoutError), e:
+                conn.disconnect()
+                if not conn.retry_on_timeout and isinstance(e, TimeoutError):
+                    raise
+                # if we were watching a variable, the watch is no longer valid
+                # since this connection has died. raise a WatchError, which
+                # indicates the user should retry his transaction. If this is more
+                # than a temporary failure, the WATCH that the user next issues
+                # will fail, propegating the real ConnectionError
+                if self.watching:
+                    raise WatchError("A ConnectionError occured on while watching "
+                                     "one or more keys")
+                # otherwise, it's safe to retry since the transaction isn't
+                # predicated on any state
+                return execute(conn, stack, raise_on_error)
         finally:
             self.reset()
 

@@ -1,11 +1,14 @@
 """Internal module for Python 2 backwards compatibility."""
 import errno
 import sys
+from redis.utils import ternary
+from parse_qs import parse_qs
 
 try:
     InterruptedError = InterruptedError
 except:
     InterruptedError = OSError
+
 
 # For Python older than 3.5, retry EINTR.
 if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
@@ -21,7 +24,7 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
         while True:
             try:
                 return _select(rlist, wlist, xlist, timeout)
-            except InterruptedError as e:
+            except InterruptedError, e:
                 # Python 2 does not define InterruptedError, instead
                 # try to catch an OSError with errno == EINTR == 4.
                 if getattr(e, 'errno', None) == getattr(errno, 'EINTR', 4):
@@ -56,7 +59,7 @@ if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and
                 try:
                     attempted = True
                     return func(*args, **kwargs)
-                except socket.error as e:
+                except socket.error, e:
                     if e.args[0] == errno.EINTR:
                         continue
                     raise
@@ -83,7 +86,7 @@ else:  # Python 3.5 and above automatically retry EINTR
 
 if sys.version_info[0] < 3:
     from urllib import unquote
-    from urlparse import parse_qs, urlparse
+    from urlparse import urlparse
     from itertools import imap, izip
     from string import letters as ascii_letters
     from Queue import Queue
@@ -112,7 +115,8 @@ if sys.version_info[0] < 3:
         return x.itervalues()
 
     def nativestr(x):
-        return x if isinstance(x, str) else x.encode('utf-8', 'replace')
+        #return x if isinstance(x, str) else x.encode('utf-8', 'replace')
+        return ternary(isinstance(x, str), lambda: x, lambda: x.encode('utf-8', 'replace'))
 
     def u(x):
         return x.decode()
@@ -133,7 +137,7 @@ if sys.version_info[0] < 3:
     bytes = str
     long = long
 else:
-    from urllib.parse import parse_qs, unquote, urlparse
+    from urllib.parse import unquote, urlparse
     from io import BytesIO
     from string import ascii_letters
     from queue import Queue
@@ -151,13 +155,15 @@ else:
         return chr(x)
 
     def nativestr(x):
-        return x if isinstance(x, str) else x.decode('utf-8', 'replace')
+        #return x if isinstance(x, str) else x.decode('utf-8', 'replace')
+        return ternary(isinstance(x, str), lambda: x, lambda: x.decode('utf-8', 'replace'))
 
     def u(x):
         return x
 
     def b(x):
-        return x.encode('latin-1') if not isinstance(x, bytes) else x
+        #return x.encode('latin-1') if not isinstance(x, bytes) else x
+        return ternary(not isinstance(x, bytes), lambda: x.encode('latin-1'), lambda: x)
 
     next = next
     unichr = chr

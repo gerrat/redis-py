@@ -1,5 +1,3 @@
-from contextlib import contextmanager
-
 
 try:
     import hiredis
@@ -19,15 +17,16 @@ def from_url(url, db=None, **kwargs):
     return Redis.from_url(url, db, **kwargs)
 
 
-@contextmanager
-def pipeline(redis_obj):
-    p = redis_obj.pipeline()
-    yield p
-    p.execute()
-
-
 class dummy(object):
     """
     Instances of this class can be used as an attribute container.
     """
     pass
+
+
+def ternary(cond, true, false):
+    """My 2.4 backport alternative to Python's ternary expression"""
+    if cond:
+        return true()
+    else:
+        return false()

@@ -2,7 +2,7 @@ import threading
 import time as mod_time
 import uuid
 from redis.exceptions import LockError, WatchError
-from redis.utils import dummy
+from redis.utils import dummy, ternary
 from redis._compat import b
 
 
@@ -73,7 +73,8 @@ class Lock(object):
         self.blocking = blocking
         self.blocking_timeout = blocking_timeout
         self.thread_local = bool(thread_local)
-        self.local = threading.local() if self.thread_local else dummy()
+        #self.local = threading.local() if self.thread_local else dummy()
+        self.local = ternary(self.thread_local, lambda: threading.local(), lambda: dummy())
         self.local.token = None
         if self.timeout and self.sleep > self.timeout:
             raise LockError("'sleep' must be less than 'timeout'")

@@ -1,4 +1,3 @@
-from __future__ import with_statement
 from distutils.version import StrictVersion
 from itertools import chain
 import os
@@ -503,7 +502,7 @@ class Connection(object):
                 sock.settimeout(self.socket_timeout)
                 return sock
 
-            except socket.error as _:
+            except socket.error, _:
                 err = _
                 if sock is not None:
                     sock.close()
@@ -848,9 +847,21 @@ class ConnectionPool(object):
                     url_options[name] = value[0]
 
         if decode_components:
-            password = unquote(url.password) if url.password else None
-            path = unquote(url.path) if url.path else None
-            hostname = unquote(url.hostname) if url.hostname else None
+            if url.password:
+                password = unquote(url.password)
+            else:
+                password = None
+
+            if url.path:
+                path = unquote(url.path)
+            else:
+                path = None
+            
+            if url.hostname:
+                hostname = unquote(url.hostname)
+            else:
+                hostname = None
+
         else:
             password = url.password
             path = url.path
@@ -937,13 +948,16 @@ class ConnectionPool(object):
 
     def _checkpid(self):
         if self.pid != os.getpid():
-            with self._check_lock:
+            try:
+                self._check_lock.acquire()
                 if self.pid == os.getpid():
                     # another thread already did the work while we waited
                     # on the lock.
                     return
                 self.disconnect()
                 self.reset()
+            finally:
+                self._check_lock.release()
 
     def get_connection(self, command_name, *keys, **options):
         "Get a connection from the pool"
